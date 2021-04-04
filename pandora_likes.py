@@ -1,91 +1,45 @@
 import requests
 import datetime
+import asyncio
 import sys
 import time
 import json
+from stealth_login import StealthLogin
 
 class Downloader:
     def __init__(self, email, password):
-        self.email = email
-        self.password = password
         self.session = requests.session()
+        self.stealth_login = StealthLogin(email, password)
 
-    def get_csrf_token(self):
-        """Generate a CSRF token used to log in."""
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:80.0) Gecko/20100101 Firefox/80.0",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-            "Pragma": "no-cache",
-            "Cache-Control": "no-cache",
-            "TE": "Trailers",
-        }
+    def load_auth_details(self, cookies, response_json):
+        """Set the session cookies gathered with StealthLogin that are required to access the /getFeedback endpoint"""
+        required_cookie_names = ["csrftoken", "at"]
 
-        sign_in_url = "https://www.pandora.com/account/sign-in"
-        self.session.get(sign_in_url, headers=headers)
+        for cookie in cookies:
+            cookie_name = cookie.get("name")
+            if cookie_name in required_cookie_names:
+                self.session.cookies.set_cookie(requests.cookies.create_cookie(name=cookie_name, value=cookie.get("value"), domain="www.pandora.com"))
 
-        csrf_token = self.session.cookies.get_dict().get("csrftoken")
-        if csrf_token is not None:
-            return csrf_token
-
-        print("Error getting CSRF, Exiting")
-        sys.exit()
-
-    def login(self, csrf):
-        """Login to Pandora and return the webname and auth token."""
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:80.0) Gecko/20100101 Firefox/80.0",
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "en-US,en;q=0.5",
-            "Content-Type": "application/json",
-            "X-CsrfToken": csrf,
-            "Origin": "https://www.pandora.com",
-            "Connection": "keep-alive",
-            "Referer": "https://www.pandora.com/account/sign-in",
-            "Pragma": "no-cache",
-            "Cache-Control": "no-cache",
-            "TE": "Trailers",
-        }
-        data = {
-            "existingAuthToken": None,
-            "username": self.email,
-            "password": self.password,
-            "keepLoggedIn": True
-        }
-
-        response_json = self.session.post('https://www.pandora.com/api/v1/auth/login', headers=headers, json=data).json()
-        auth_token = response_json.get("authToken")
-        webname = response_json.get("webname")
-
-        if auth_token is None or webname is None:
-            print("Unable to Login... Check Email and Password")
-            sys.exit()
-
-        print("Successfully Logged In!")
-        return auth_token, webname
+        return self.session.cookies.get("csrftoken"), response_json.get("authToken"), response_json.get("webname")
 
     def get_amount_songs(self, auth_token, csrf_token, webname):
         """Visit Pandora song API to determine the total amount of liked songs"""
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:80.0) Gecko/20100101 Firefox/80.0",
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "en-US,en;q=0.5",
-            "Content-Type": "application/json",
-            "X-AuthToken": auth_token,
-            "X-CsrfToken": csrf_token,
-            "Origin": "https://www.pandora.com",
-            "Connection": "keep-alive",
-            "Referer": "https://www.pandora.com",
-            "Pragma": "no-cache",
-            "Cache-Control": "no-cache",
-            "TE": "Trailers",
+            'origin': 'https://www.pandora.com',
+            'accept-encoding': 'gzip, deflate, br',
+            'accept-language': 'en-US,en;q=0.9',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3542.0 Safari/537.36',
+            'x-csrftoken': csrf_token,
+            'content-type': 'application/json',
+            'accept': 'application/json, text/plain, */*',
+            'x-authtoken': auth_token,
+            'referer': f'https://www.pandora.com/profile/thumbs/{webname}',
+            'authority': 'www.pandora.com',
         }
         data = {
-            "pageSize": 1,
-            "startIndex": 0,
-            "webname": webname
+            'pageSize':1,
+            'startIndex':0,
+            'webname':webname
         }
 
         songs_url = "https://www.pandora.com/api/v1/station/getFeedback"
@@ -161,7 +115,7 @@ class Downloader:
             parsed_songs = self.parse_songs(parsed_songs, songs)
 
             fetched_songs += len(songs)
-            time.sleep(1.25)
+            time.sleep(0.75)
 
         return parsed_songs
 
@@ -178,20 +132,26 @@ class Downloader:
         """Write detailed and formatted songs to file system"""
         current_time = datetime.datetime.today().strftime("%Y-%m-%d %H.%M.%S")
         songs_json_filename = f"{webname} {current_time}.json"
+        songs_txt_filename = f"formatted_songs {current_time}.txt"
+        formatted_songs = self.format_songs(song_list)
 
         with open(songs_json_filename, "w", encoding="utf-8") as f:
             json.dump(song_list, f)
 
-        formatted_songs = self.format_songs(song_list)
-        songs_txt_filename = f"formatted_songs {current_time}.txt"
-
         with open(songs_txt_filename, "w", encoding="utf-8") as f:
             f.write(formatted_songs)
 
+        print(f"\nWrote Songs (JSON) to {songs_json_filename}")
+        print(f"Wrote Songs (TXT) to {songs_txt_filename}")
+
     def download_likes(self):
         """Main method encompassing all functionailty for downloading song information"""
-        csrf_token = self.get_csrf_token()
-        auth_token, webname = self.login(csrf_token)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(self.stealth_login.initiate_browser())
+
+        cookies, login_response_json = loop.run_until_complete(self.stealth_login.fetch_login_data())
+        csrf_token, auth_token, webname = self.load_auth_details(cookies, login_response_json)
         song_count = self.get_amount_songs(auth_token, csrf_token, webname)
 
         parsed_songs = self.compile_liked_songs(auth_token, csrf_token, song_count, webname)
