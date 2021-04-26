@@ -90,15 +90,19 @@ class Downloader:
     def parse_songs(parsed_songs, songs_batch):
         """Append and extract various information for a 'batch' of liked songs"""
         for song in songs_batch:
-            song_and_artist = {
-                "title": song["songTitle"],
-                "artist": song["artistName"],
-                "album": song["albumTitle"],
-                "date_liked": song["feedbackDateCreated"],
-                "from_station": song["stationName"],
-                "track_length": song["trackLength"]
-            }
-            parsed_songs.append(song_and_artist)
+            try:
+                song_and_artist = {
+                    "title": song["songTitle"],
+                    "artist": song["artistName"],
+                    "album": song["albumTitle"],
+                    "date_liked": song["feedbackDateCreated"],
+                    "from_station": song["stationName"],
+                    "track_length": song["trackLength"]
+                }
+                parsed_songs.append(song_and_artist)
+            except KeyError:
+                print("** Error Parsing Song, Skipping")
+
         return parsed_songs
 
     def compile_liked_songs(self, auth_token, csrf_token, song_count, webname):
@@ -109,7 +113,7 @@ class Downloader:
 
         while fetched_songs < song_count:
             if song_count - fetched_songs < 100:
-                fetch_amount = song_count-fetched_songs
+                fetch_amount = song_count - fetched_songs
 
             songs = self.fetch_songs(auth_token, csrf_token, webname, fetched_songs, fetch_amount)
             parsed_songs = self.parse_songs(parsed_songs, songs)
