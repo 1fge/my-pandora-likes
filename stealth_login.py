@@ -61,8 +61,8 @@ class StealthLogin:
             # Submit login details
             window_width, window_height = await self.get_window_dimensions()
             await self.page.mouse.move(random.randrange(0,window_width), random.randrange(0,window_height))
-            await self.page.hover("#form-template > div:nth-child(3) > div > button")
-            await self.page.click("#form-template > div:nth-child(3) > div > button")
+            await self.page.hover("#form-template > div:nth-child(4) > div > button")
+            await self.page.click("#form-template > div:nth-child(4) > div > button")
 
             try:
                 response = await self.page.waitForResponse("https://www.pandora.com/api/v1/auth/login")
